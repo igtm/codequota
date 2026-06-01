@@ -53,7 +53,7 @@ fn default_command_shows_all_providers_and_succeeds_with_partial_success() {
         .create();
 
     let mut command = Command::cargo_bin("codequota").expect("binary should build");
-    command
+    let assert = command
         .env("CODEQUOTA_CODEX_AUTH_FILE", &auth_path)
         .env(
             "CODEQUOTA_CODEX_USAGE_URL",
@@ -62,8 +62,15 @@ fn default_command_shows_all_providers_and_succeeds_with_partial_success() {
         .assert()
         .success()
         .stdout(predicate::str::contains("claude-code  error"))
-        .stdout(predicate::str::contains("claude-desktop  unsupported"))
         .stdout(predicate::str::contains("codex  ok"));
+
+    #[cfg(target_os = "linux")]
+    let assert = assert.stdout(predicate::str::contains("claude-desktop  unsupported"));
+
+    #[cfg(target_os = "macos")]
+    let assert = assert.stdout(predicate::str::contains("claude-desktop  error"));
+
+    let _ = assert;
 }
 
 #[test]
