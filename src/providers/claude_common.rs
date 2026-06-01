@@ -1,6 +1,8 @@
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+#[cfg(not(target_os = "macos"))]
+use std::path::Path;
+use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use std::process::Command;
 
@@ -117,7 +119,7 @@ pub fn load_claude_desktop_credentials() -> Result<ClaudeCredentials, ProviderEr
                 "com.anthropic.Claude",
                 CLAUDE_CODE_SERVICE,
             ],
-        );
+        )
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
