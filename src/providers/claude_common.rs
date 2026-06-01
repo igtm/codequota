@@ -76,7 +76,7 @@ pub fn load_claude_code_credentials() -> Result<ClaudeCredentials, ProviderError
 
     #[cfg(target_os = "macos")]
     {
-        return load_keychain_credentials(provider, &[CLAUDE_CODE_SERVICE]);
+        load_keychain_credentials(provider, &[CLAUDE_CODE_SERVICE])
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -108,7 +108,7 @@ pub fn load_claude_desktop_credentials() -> Result<ClaudeCredentials, ProviderEr
             return load_keychain_credentials(provider, &[service.as_str()]);
         }
 
-        return load_keychain_credentials(
+        load_keychain_credentials(
             provider,
             &[
                 "Claude Desktop",
@@ -400,6 +400,7 @@ fn send_refresh_request(
     })
 }
 
+#[cfg(not(target_os = "macos"))]
 fn load_file_credentials(
     provider: ProviderKind,
     path: &Path,
@@ -741,6 +742,7 @@ fn extract_error_message(body: &str, fallback: &str) -> String {
         })
 }
 
+#[cfg(not(target_os = "macos"))]
 fn home_dir() -> PathBuf {
     env::var_os("HOME")
         .map(PathBuf::from)
