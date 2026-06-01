@@ -65,9 +65,11 @@ Human-readable mode prints one line per provider with:
 | --- | --- |
 | `claude-code` | `CLAUDE_CODE_OAUTH_TOKEN`, macOS Keychain `Claude Code-credentials`, or Linux `~/.claude/.credentials.json` / `$CLAUDE_CONFIG_DIR/.credentials.json` |
 | `claude-desktop` | macOS saved desktop credentials only |
-| `codex` | `~/.codex/auth.json` |
+| `codex` | `CODEX_ACCESS_TOKEN`, `CODEQUOTA_CODEX_AUTH_FILE`, or `~/.codex/auth.json` |
 
 Claude Code refreshes expired access tokens when a refresh token is available, then writes the rotated token back to the original store.
+
+Recent Codex CLI builds may store ChatGPT login state in keyring instead of `~/.codex/auth.json`. In that case, export `CODEX_ACCESS_TOKEN` before running `codequota`, or point `CODEQUOTA_CODEX_AUTH_FILE` at a compatible JSON auth file.
 
 ## Platform Support
 

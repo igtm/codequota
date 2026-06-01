@@ -47,7 +47,7 @@ impl ProviderStatus {
 #[derive(Clone, Debug, Serialize)]
 pub struct UsageWindow {
     pub utilization: f64,
-    pub resets_at: DateTime<Utc>,
+    pub resets_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug, Serialize)]

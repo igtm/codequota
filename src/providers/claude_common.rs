@@ -298,7 +298,9 @@ fn parse_window(
         .get("resets_at")
         .or_else(|| object.get("resetsAt"))
         .ok_or_else(|| ProviderError::parse(provider, format!("{field}.resets_at missing")))
-        .and_then(|value| parse_timestamp(provider, value, &format!("{field}.resets_at")))?;
+        .and_then(|value| {
+            parse_optional_timestamp(provider, value, &format!("{field}.resets_at"))
+        })?;
 
     Ok(Some(UsageWindow {
         utilization,
@@ -690,6 +692,18 @@ pub fn parse_timestamp(
     }
 }
 
+pub fn parse_optional_timestamp(
+    provider: ProviderKind,
+    value: &Value,
+    field: &str,
+) -> Result<Option<DateTime<Utc>>, ProviderError> {
+    if value.is_null() {
+        return Ok(None);
+    }
+
+    parse_timestamp(provider, value, field).map(Some)
+}
+
 fn timestamp_from_seconds(
     provider: ProviderKind,
     seconds: i64,
@@ -781,6 +795,18 @@ mod tests {
         .expect("RFC3339 timestamp should parse");
 
         assert_eq!(parsed.to_rfc3339(), "2026-02-08T04:59:59+00:00");
+    }
+
+    #[test]
+    fn parses_null_timestamp() {
+        let parsed = parse_optional_timestamp(
+            ProviderKind::ClaudeCode,
+            &Value::Null,
+            "five_hour.resets_at",
+        )
+        .expect("null timestamp should parse");
+
+        assert_eq!(parsed, None);
     }
 
     #[cfg(not(target_os = "macos"))]
