@@ -2,9 +2,13 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
+use std::process::Command;
 
 use reqwest::StatusCode;
 use serde_json::{Map, Value};
+#[cfg(target_os = "macos")]
+use sha2::{Digest, Sha256};
 
 use super::claude_common::{parse_optional_timestamp, take_f64};
 use super::error::ProviderError;
@@ -16,6 +20,16 @@ const CODEX_AUTH_FILE_ENV: &str = "CODEQUOTA_CODEX_AUTH_FILE";
 const CODEX_ACCESS_TOKEN_ENV: &str = "CODEX_ACCESS_TOKEN";
 const CODEX_ACCOUNT_ID_ENV: &str = "CODEX_ACCOUNT_ID";
 const CHATGPT_ACCOUNT_ID_ENV: &str = "CHATGPT_ACCOUNT_ID";
+const CODEX_HOME_ENV: &str = "CODEX_HOME";
+#[cfg(target_os = "macos")]
+const CODEX_KEYCHAIN_SERVICE: &str = "Codex Auth";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CodexCredentialsStoreMode {
+    File,
+    Keyring,
+    Auto,
+}
 
 #[derive(Debug, Eq, PartialEq)]
 struct CodexAuth {
@@ -122,6 +136,9 @@ fn fetch_usage_from_endpoint(
 }
 
 fn load_auth() -> Result<CodexAuth, ProviderError> {
+    let codex_home = codex_home();
+    let store_mode = codex_config_store_mode(&codex_home);
+
     if let Ok(access_token) = env::var(CODEX_ACCESS_TOKEN_ENV)
         && !access_token.trim().is_empty()
     {
@@ -136,18 +153,30 @@ fn load_auth() -> Result<CodexAuth, ProviderError> {
         return read_auth_file(&path);
     }
 
-    let default_path = home_dir().join(".codex/auth.json");
-    if default_path.is_file() {
-        return read_auth_file(&default_path);
+    let default_path = codex_home.join("auth.json");
+
+    #[cfg(target_os = "macos")]
+    if matches!(
+        store_mode,
+        Some(CodexCredentialsStoreMode::Keyring) | Some(CodexCredentialsStoreMode::Auto)
+    ) {
+        match load_auth_from_keychain(&codex_home) {
+            Ok(auth) => return Ok(auth),
+            Err(_error)
+                if matches!(store_mode, Some(CodexCredentialsStoreMode::Auto))
+                    && default_path.is_file() =>
+            {
+                return read_auth_file(&default_path);
+            }
+            Err(error) if matches!(store_mode, Some(CodexCredentialsStoreMode::Keyring)) => {
+                return Err(error);
+            }
+            Err(_) => {}
+        }
     }
 
-    if codex_config_uses_keyring() {
-        return Err(ProviderError::auth(
-            ProviderKind::Codex,
-            format!(
-                "Codex CLI appears to store auth in keyring; export {CODEX_ACCESS_TOKEN_ENV} or set {CODEX_AUTH_FILE_ENV} to a JSON auth file"
-            ),
-        ));
+    if default_path.is_file() {
+        return read_auth_file(&default_path);
     }
 
     Err(ProviderError::io(
@@ -177,6 +206,70 @@ fn read_auth_file(path: &Path) -> Result<CodexAuth, ProviderError> {
     let mut auth = parse_auth_value(&value)?;
     auth.auth_source = path.display().to_string();
     Ok(auth)
+}
+
+#[cfg(target_os = "macos")]
+fn load_auth_from_keychain(codex_home: &Path) -> Result<CodexAuth, ProviderError> {
+    let account = compute_store_key(codex_home);
+    let output = Command::new("security")
+        .args([
+            "find-generic-password",
+            "-s",
+            CODEX_KEYCHAIN_SERVICE,
+            "-a",
+            &account,
+            "-w",
+        ])
+        .output()
+        .map_err(|error| {
+            ProviderError::io(
+                ProviderKind::Codex,
+                format!(
+                    "failed to execute macOS security command for service {CODEX_KEYCHAIN_SERVICE} account {account}: {error}"
+                ),
+            )
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let message = if stderr.is_empty() {
+            format!("security exited with status {}", output.status)
+        } else {
+            stderr
+        };
+        return Err(ProviderError::auth(
+            ProviderKind::Codex,
+            format!(
+                "failed to read macOS keychain service {CODEX_KEYCHAIN_SERVICE} account {account}: {message}"
+            ),
+        ));
+    }
+
+    let value = serde_json::from_slice::<Value>(&output.stdout).map_err(|error| {
+        ProviderError::parse(
+            ProviderKind::Codex,
+            format!(
+                "invalid auth JSON in macOS keychain service {CODEX_KEYCHAIN_SERVICE}: {error}"
+            ),
+        )
+    })?;
+
+    let mut auth = parse_auth_value(&value)?;
+    auth.auth_source = format!("macos-keychain:{CODEX_KEYCHAIN_SERVICE}");
+    Ok(auth)
+}
+
+#[cfg(target_os = "macos")]
+fn compute_store_key(codex_home: &Path) -> String {
+    let canonical = codex_home
+        .canonicalize()
+        .unwrap_or_else(|_| codex_home.to_path_buf());
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.to_string_lossy().as_bytes());
+    let digest = hasher.finalize();
+    let hex = format!("{digest:x}");
+    let truncated = hex.get(..16).unwrap_or(&hex);
+    format!("cli|{truncated}")
 }
 
 fn parse_auth_value(value: &Value) -> Result<CodexAuth, ProviderError> {
@@ -349,22 +442,29 @@ fn env_account_id() -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
-fn codex_config_uses_keyring() -> bool {
-    let config_path = home_dir().join(".codex/config.toml");
+fn codex_config_store_mode(codex_home: &Path) -> Option<CodexCredentialsStoreMode> {
+    let config_path = codex_home.join("config.toml");
     let Ok(raw) = fs::read_to_string(config_path) else {
-        return false;
+        return None;
     };
 
-    codex_config_store_is_keyring(&raw)
+    codex_config_store_mode_from_raw(&raw)
 }
 
-fn codex_config_store_is_keyring(raw: &str) -> bool {
-    raw.lines().any(|line| {
+fn codex_config_store_mode_from_raw(raw: &str) -> Option<CodexCredentialsStoreMode> {
+    raw.lines().find_map(|line| {
         let trimmed = line.trim();
-        trimmed.starts_with("cli_auth_credentials_store")
-            && trimmed
-                .split_once('=')
-                .is_some_and(|(_, value)| value.trim().trim_matches('"') == "keyring")
+        if !trimmed.starts_with("cli_auth_credentials_store") {
+            return None;
+        }
+
+        let (_, value) = trimmed.split_once('=')?;
+        match value.trim().trim_matches('"') {
+            "file" => Some(CodexCredentialsStoreMode::File),
+            "keyring" => Some(CodexCredentialsStoreMode::Keyring),
+            "auto" => Some(CodexCredentialsStoreMode::Auto),
+            _ => None,
+        }
     })
 }
 
@@ -393,6 +493,12 @@ fn home_dir() -> PathBuf {
     env::var_os("HOME")
         .map(PathBuf::from)
         .expect("HOME must be set on supported platforms")
+}
+
+fn codex_home() -> PathBuf {
+    env::var_os(CODEX_HOME_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_dir().join(".codex"))
 }
 
 #[cfg(test)]
@@ -543,12 +649,26 @@ mod tests {
 
     #[test]
     fn detects_keyring_config() {
-        assert!(codex_config_store_is_keyring(
-            r#"cli_auth_credentials_store = "keyring""#
-        ));
-        assert!(!codex_config_store_is_keyring(
-            r#"cli_auth_credentials_store = "file""#
-        ));
+        assert_eq!(
+            codex_config_store_mode_from_raw(r#"cli_auth_credentials_store = "keyring""#),
+            Some(CodexCredentialsStoreMode::Keyring)
+        );
+        assert_eq!(
+            codex_config_store_mode_from_raw(r#"cli_auth_credentials_store = "auto""#),
+            Some(CodexCredentialsStoreMode::Auto)
+        );
+        assert_eq!(
+            codex_config_store_mode_from_raw(r#"cli_auth_credentials_store = "file""#),
+            Some(CodexCredentialsStoreMode::File)
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn computes_macos_store_key_shape() {
+        let key = compute_store_key(Path::new("/tmp/example-codex-home"));
+        assert!(key.starts_with("cli|"));
+        assert_eq!(key.len(), 20);
     }
 
     #[test]
