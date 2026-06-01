@@ -1,7 +1,9 @@
 use std::env;
+#[cfg(not(target_os = "macos"))]
 use std::fs;
 #[cfg(not(target_os = "macos"))]
 use std::path::Path;
+#[cfg(not(target_os = "macos"))]
 use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use std::process::Command;
@@ -781,6 +783,7 @@ mod tests {
         assert_eq!(parsed.to_rfc3339(), "2026-02-08T04:59:59+00:00");
     }
 
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn reads_linux_credentials_fixture() {
         let fixture = r#"{
