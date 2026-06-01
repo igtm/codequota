@@ -87,10 +87,22 @@ Install the latest release into `~/.local/bin`:
 ./install.sh
 ```
 
+Install directly from GitHub:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/igtm/codequota/main/install.sh | sh
+```
+
 Install to a different directory:
 
 ```sh
 ./install.sh -b /usr/local/bin
+```
+
+Install system-wide with `sudo`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/igtm/codequota/main/install.sh | sudo sh -s -- -b /usr/local/bin
 ```
 
 Install a specific version:
@@ -101,7 +113,7 @@ Install a specific version:
 
 Environment overrides:
 
-- `CODEQUOTA_REPO` changes the GitHub repo slug used by the installer. Default: `codequota/codequota`.
+- `CODEQUOTA_REPO` changes the GitHub repo slug used by the installer. Default: `igtm/codequota`.
 
 ## Release Assets
 

@@ -3,12 +3,17 @@
 set -eu
 
 BIN_NAME="codequota"
-REPO_SLUG="${CODEQUOTA_REPO:-codequota/codequota}"
-INSTALL_DIR="${HOME}/.local/bin"
+REPO_SLUG="${CODEQUOTA_REPO:-igtm/codequota}"
+INSTALL_DIR=""
+INSTALL_DIR_SET=0
 REQUESTED_VERSION="latest"
 
 have_cmd() {
   command -v "$1" >/dev/null 2>&1
+}
+
+is_root() {
+  [ "$(id -u)" -eq 0 ]
 }
 
 fail() {
@@ -31,6 +36,15 @@ download() {
   fi
 
   fail "curl or wget is required"
+}
+
+default_install_dir() {
+  if is_root; then
+    printf '%s\n' '/usr/local/bin'
+    return
+  fi
+
+  printf '%s\n' "${HOME}/.local/bin"
 }
 
 normalize_arch() {
@@ -146,7 +160,7 @@ usage() {
 Usage: ./install.sh [-b bindir] [-v version]
 
 Options:
-  -b DIR   Install ${BIN_NAME} into DIR (default: ${HOME}/.local/bin)
+  -b DIR   Install ${BIN_NAME} into DIR (default: ~/.local/bin, or /usr/local/bin when run as root)
   -v VER   Install a specific version (default: latest release)
   -h       Show this help text
 EOF
@@ -157,6 +171,7 @@ parse_args() {
     case "$opt" in
       b)
         INSTALL_DIR="$OPTARG"
+        INSTALL_DIR_SET=1
         ;;
       v)
         REQUESTED_VERSION="$OPTARG"
@@ -181,6 +196,9 @@ parse_args() {
 
 main() {
   parse_args "$@"
+  if [ "$INSTALL_DIR_SET" -eq 0 ]; then
+    INSTALL_DIR="$(default_install_dir)"
+  fi
   target="$(detect_target)"
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT INT TERM
