@@ -33,6 +33,7 @@ pub struct ClaudeCredentials {
 #[derive(Clone, Debug)]
 enum CredentialStorage {
     Env,
+    #[cfg(not(target_os = "macos"))]
     File {
         path: PathBuf,
         root: Value,
@@ -534,6 +535,7 @@ impl ClaudeCredentials {
     fn persist(&mut self, provider: ProviderKind) -> Result<(), ProviderError> {
         match &mut self.storage {
             CredentialStorage::Env => Ok(()),
+            #[cfg(not(target_os = "macos"))]
             CredentialStorage::File { path, root } => {
                 update_credential_value(root, &self.access_token, self.refresh_token.as_deref());
                 let serialized = serde_json::to_string_pretty(root).map_err(|error| {
